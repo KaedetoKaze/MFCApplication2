@@ -61,6 +61,7 @@ private:
 	CCanvasStatic m_canvasProfile;
 
 	std::vector<double> m_depthNormalized;
+	std::vector<double> m_depthRaw;
 	size_t m_depthWidth{0};
 	size_t m_depthHeight{0};
 

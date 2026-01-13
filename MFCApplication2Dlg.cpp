@@ -113,10 +113,11 @@ BOOL CMFCApplication2Dlg::OnInitDialog()
 
 	// 设置此对话框的图标。  当应用程序主窗口不是对话框时，框架将自动
 	//  执行此操作
-	SetIcon(m_hIcon, TRUE);			// 设置大图标
-	SetIcon(m_hIcon, FALSE);		// 设置小图标
+	SetIcon(m_hIcon, TRUE); 		// 设置大图标
+	SetIcon(m_hIcon, FALSE); 		// 设置小图标
 
 	// TODO: 在此添加额外的初始化代码
+	m_canvasColor.EnableCenterLine(true);
 
 	return TRUE;  // 除非将焦点设置到控件，否则返回 TRUE
 }
@@ -213,7 +214,7 @@ void CMFCApplication2Dlg::OnBnClickedChoosePicture()
         m_canvasDepth.SetImage(depthBmp);
     }
 
-    const auto profile = BuildCenterProfile(m_depthNormalized, m_depthWidth, m_depthHeight);
+    const auto profile = BuildCenterProfile(m_depthRaw, m_depthWidth, m_depthHeight);
     m_canvasProfile.SetCurveData(profile);
 }
 
@@ -240,96 +241,99 @@ bool CMFCApplication2Dlg::LoadColorImage(const std::wstring& path)
 
 namespace
 {
-    template <typename T>
-    bool NormalizeDepth(const cnpy::NpyArray& arr, std::vector<double>& normalized, size_t& width, size_t& height)
-    {
-        if (arr.shape.size() != 2)
-            return false;
+	template <typename T>
+	bool NormalizeDepth(const cnpy::NpyArray& arr, std::vector<double>& normalized, std::vector<double>& rawCm, size_t& width, size_t& height)
+	{
+		if (arr.shape.size() != 2)
+			return false;
 
-        height = arr.shape[0];
-        width = arr.shape[1];
-        const size_t total = width * height;
-        if (total == 0)
-            return false;
+		height = arr.shape[0];
+		width = arr.shape[1];
+		const size_t total = width * height;
+		if (total == 0)
+			return false;
 
-        const T* ptr = arr.data<T>();
-        normalized.resize(total);
+		const T* ptr = arr.data<T>();
+		normalized.resize(total);
+		rawCm.resize(total);
 
-        double minv = std::numeric_limits<double>::max();
-        double maxv = -std::numeric_limits<double>::max();
-        size_t validCount = 0;
+		double minv = std::numeric_limits<double>::max();
+		double maxv = -std::numeric_limits<double>::max();
+		size_t validCount = 0;
 
-        for (size_t i = 0; i < total; ++i)
-        {
-            double v = static_cast<double>(ptr[i]);
-            const bool valid = std::isfinite(v) && v > 0.0;
-            if (valid)
-            {
-                minv = std::min(minv, v);
-                maxv = std::max(maxv, v);
-                ++validCount;
-            }
-        }
+		for (size_t i = 0; i < total; ++i)
+		{
+			double v = static_cast<double>(ptr[i]);
+			const bool valid = std::isfinite(v) && v > 0.0;
+			rawCm[i] = valid ? v * 100.0 : std::numeric_limits<double>::quiet_NaN();
+			if (valid)
+			{
+				minv = std::min(minv, v);
+				maxv = std::max(maxv, v);
+				++validCount;
+			}
+		}
 
-        if (validCount == 0)
-            return false;
+		if (validCount == 0)
+			return false;
 
-        const double denom = (maxv - minv);
-        for (size_t i = 0; i < total; ++i)
-        {
-            double v = static_cast<double>(ptr[i]);
-            const bool valid = std::isfinite(v) && v > 0.0;
-            if (!valid)
-            {
-                normalized[i] = std::numeric_limits<double>::quiet_NaN();
-                continue;
-            }
-            if (denom < 1e-9)
-            {
-                normalized[i] = 1.0;
-            }
-            else
-            {
-                normalized[i] = (v - minv) / denom;
-            }
-        }
-        return true;
-    }
+		const double denom = (maxv - minv);
+		for (size_t i = 0; i < total; ++i)
+		{
+			double v = static_cast<double>(ptr[i]);
+			const bool valid = std::isfinite(v) && v > 0.0;
+			if (!valid)
+			{
+				normalized[i] = std::numeric_limits<double>::quiet_NaN();
+				continue;
+			}
+			if (denom < 1e-9)
+			{
+				normalized[i] = 1.0;
+			}
+			else
+			{
+				normalized[i] = (v - minv) / denom;
+			}
+		}
+		return true;
+	}
 }
 
 bool CMFCApplication2Dlg::LoadDepthFile(const std::wstring& path)
 {
-    cnpy::NpyArray arr;
-    try
-    {
-        arr = cnpy::npy_load(std::string(fs::path(path).u8string()));
-    }
-    catch (const std::exception&)
-    {
-        MessageBox(L"读取深度文件失败", L"错误", MB_ICONERROR);
-        return false;
-    }
+	cnpy::NpyArray arr;
+	try
+	{
+		arr = cnpy::npy_load(std::string(fs::path(path).u8string()));
+	}
+	catch (const std::exception&)
+	{
+		MessageBox(L"读取深度文件失败", L"错误", MB_ICONERROR);
+		return false;
+	}
 
-    m_depthNormalized.clear();
-    m_depthWidth = m_depthHeight = 0;
+	m_depthNormalized.clear();
+	m_depthRaw.clear();
+	m_depthWidth = m_depthHeight = 0;
 
-    bool ok = false;
-    if (arr.word_size == sizeof(float))
-    {
-        ok = NormalizeDepth<float>(arr, m_depthNormalized, m_depthWidth, m_depthHeight);
-    }
-    else if (arr.word_size == sizeof(uint16_t))
-    {
-        ok = NormalizeDepth<uint16_t>(arr, m_depthNormalized, m_depthWidth, m_depthHeight);
-    }
+	bool ok = false;
+	if (arr.word_size == sizeof(float))
+	{
+		ok = NormalizeDepth<float>(arr, m_depthNormalized, m_depthRaw, m_depthWidth, m_depthHeight);
+	}
+	else if (arr.word_size == sizeof(uint16_t))
+	{
+		ok = NormalizeDepth<uint16_t>(arr, m_depthNormalized, m_depthRaw, m_depthWidth, m_depthHeight);
+	}
 
-    if (!ok)
-    {
-        MessageBox(L"深度数据格式不支持或数据为空", L"错误", MB_ICONERROR);
-        return false;
-    }
+	if (!ok)
+	{
+		MessageBox(L"深度数据格式不支持或数据为空", L"错误", MB_ICONERROR);
+		return false;
+	}
 
-    return true;
+	return true;
 }
 
 static Gdiplus::Color JetColor(double v)

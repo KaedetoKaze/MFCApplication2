@@ -13,6 +13,7 @@ public:
     void SetImage(const std::shared_ptr<Gdiplus::Bitmap>& bitmap);
     void SetCurveData(const std::vector<double>& data);
     void Clear();
+    void EnableCenterLine(bool enable);
 
 protected:
     afx_msg void OnPaint();
@@ -23,6 +24,7 @@ private:
     COLORREF m_background;
     std::shared_ptr<Gdiplus::Bitmap> m_image;
     std::vector<double> m_curveData;
+    bool m_drawCenterLine;
 
     void DrawImage(CDC& dc, const CRect& rc);
     void DrawCurve(CDC& dc, const CRect& rc);
